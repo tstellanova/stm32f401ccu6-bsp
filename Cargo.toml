@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
 edition = "2018"
 description = "Board support crate for the STM32F401CCU6 development board"
+license = "BSD-3-Clause"
+repository ="https://github.com/tstellanova/stm32f401ccu6-bsp"
 
 [dependencies]
 cortex-m = "^0.6.0"
