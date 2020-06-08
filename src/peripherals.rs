@@ -3,9 +3,6 @@ use stm32f4xx_hal as p_hal;
 use p_hal::stm32 as pac;
 use p_hal::stm32::I2C1;
 
-// use p_hal::flash::FlashExt;
-use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use p_hal::gpio::GpioExt;
 use p_hal::rcc::RccExt;
 use p_hal::time::{U32Ext};
@@ -13,8 +10,8 @@ use p_hal::time::{U32Ext};
 
 pub fn setup_peripherals() -> (
     // LED output pin
-    impl OutputPin + ToggleableOutputPin,
-    impl DelayMs<u8>,
+    UserLed1Type,
+    DelaySourceType,
     ImuI2cPortType,
     Spi1PortType,
     ChipSelectPinType,
@@ -116,5 +113,5 @@ pub type UserLed1Type =
     p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
 
-
+pub type DelaySourceType =  p_hal::delay::Delay;
 
