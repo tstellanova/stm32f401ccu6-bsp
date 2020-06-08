@@ -24,9 +24,9 @@ pub fn setup_peripherals() -> (
     let clocks = rcc
         .cfgr
         .use_hse(25.mhz()) //f401cb  board has 25 MHz crystal for HSE
-        // .sysclk(128.mhz())
-        // .pclk1(48.mhz())
-        // .pclk2(48.mhz())
+        .sysclk(84.mhz()) // f401cb supports 84 MHz sysclk max
+        .pclk1(48.mhz())
+        .pclk2(48.mhz())
         .freeze();
 
     let delay_source = p_hal::delay::Delay::new(cp.SYST, clocks);
@@ -111,7 +111,6 @@ pub type ChipSelectPinType =
 
 pub type UserLed1Type =
     p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
-
 
 pub type DelaySourceType =  p_hal::delay::Delay;
 
