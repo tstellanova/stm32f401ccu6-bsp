@@ -1,6 +1,6 @@
 [package]
 name = "stm32f401ccu6-bsp"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
 edition = "2018"
 description = "Board support crate for the STM32F401CCU6 development board"
@@ -12,4 +12,12 @@ cortex-m = "^0.6.0"
 embedded-hal = "0.2.3"
 stm32f4 = {version = "0.10.0", features = ["stm32f401"] }
 stm32f4xx-hal = { version ="0.8.2", features = ["stm32f401", "rt"]}
-#stm32f4xx-hal = { git = "https://github.com/stm32-rs/stm32f4xx-hal", features = ["stm32f401", "rt"] }
+
+[dev-dependencies]
+cortex-m-rt = "0.6.12"
+panic-rtt-core = "0.1.1"
+ssd1306 = "0.3.1"
+embedded-graphics = "0.6.2"
+
+
+

@@ -4,7 +4,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
     let mem_file = include_bytes!("stm32f401cxux_memory.x");
