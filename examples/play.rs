@@ -7,16 +7,12 @@ LICENSE: BSD3 (see LICENSE file)
 #![no_std]
 
 use cortex_m_rt as rt;
-// use p_hal::stm32 as pac;
 use rt::entry;
-use stm32f4xx_hal as p_hal;
 
 use panic_rtt_core::{self, rprintln, rtt_init_print};
 
-use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::digital::v2::ToggleableOutputPin;
-
 use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use stm32f401ccu6_bsp::peripherals;
 
 use embedded_graphics::{
@@ -46,13 +42,22 @@ fn main() -> ! {
     rprintln!("load image...");
     let raw: ImageRaw<BinaryColor> =
         ImageRaw::new(include_bytes!("./rust.raw"), 64, 64);
-    let im = Image::new(&raw, Point::new(32, 0));
+    let mut x_pos = 0;
+    let mut im = Image::new(&raw, Point::new(x_pos, 0));
 
     rprintln!("start loop...");
     loop {
         let _ = user_led.toggle();
         im.draw(&mut disp).unwrap();
+        im = im.translate(Point::new(8, 0));
+        x_pos += 8;
+        if x_pos >= 128 {
+            //wrap to left
+            im = im.translate(Point::new(-x_pos, 0));
+            x_pos = 0;
+            disp.clear();
+        }
         disp.flush().unwrap();
-        delay_source.delay_ms(500u32);
+        delay_source.delay_ms(50u8);
     }
 }
