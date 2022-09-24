@@ -6,6 +6,7 @@ use p_hal::stm32::I2C1;
 use p_hal::gpio::GpioExt;
 use p_hal::rcc::RccExt;
 use p_hal::time::U32Ext;
+use embedded_hal::digital::v2::OutputPin as OutputPin;
 
 pub fn setup_peripherals() -> (
     // LED output pin
@@ -14,10 +15,11 @@ pub fn setup_peripherals() -> (
     I2c1PortType,
     Spi1PortType,
     ChipSelectPinType,
+    DcPinType,
 ) {
     let dp = pac::Peripherals::take().unwrap();
     let cp = cortex_m::Peripherals::take().unwrap();
-
+    
     // Set up the system clock
     let rcc = dp.RCC.constrain();
     let clocks = rcc
@@ -84,9 +86,13 @@ pub fn setup_peripherals() -> (
 
     // HINTN interrupt pin
     // let hintn = gpiob.pb0.into_pull_up_input();
+    
 
-    (user_led1, delay_source, i2c1_port, spi1_port, spi_csn)
+    let dc_pin  = gpioa.pa9.into_push_pull_output();
+    ( user_led1, delay_source, i2c1_port, spi1_port, spi_csn, dc_pin)
 }
+
+
 
 pub type I2c1PortType = p_hal::i2c::I2c<
     I2C1,
@@ -107,6 +113,9 @@ pub type Spi1PortType = p_hal::spi::Spi<
 
 pub type ChipSelectPinType =
     p_hal::gpio::gpioa::PA15<p_hal::gpio::Output<p_hal::gpio::OpenDrain>>; //CSN
+
+
+pub type DcPinType =  p_hal::gpio::gpioa::PA9<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
 pub type UserLed1Type =
     p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;

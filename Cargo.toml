@@ -16,8 +16,9 @@ stm32f4xx-hal = { version ="0.8.2", features = ["stm32f401", "rt"]}
 [dev-dependencies]
 cortex-m-rt = "0.6.12"
 panic-rtt-core = "0.1.1"
-ssd1306 = "0.3.1"
-embedded-graphics = "0.6.2"
+#ssd1306 = "0.3.1"
+ssd1351 = "0.4.0"
+embedded-graphics = "0.7.1"
 
 
 
