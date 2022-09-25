@@ -51,6 +51,7 @@ fn main() -> ! {
     // TODO bogus delays -- needs calibration
     dw1000
         .set_antenna_delay(16456, 16300)
+        // .set_antenna_delay(17000u16, 17000u16)
         .expect("Failed to set antenna delay");
 
     dw1000

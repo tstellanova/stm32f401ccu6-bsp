@@ -55,7 +55,8 @@ fn main() -> ! {
 
     // TODO these are bogus delay values: need to be calibrated
     dw1000
-        .set_antenna_delay(16456, 16300)
+        // .set_antenna_delay(16456, 16300)
+        .set_antenna_delay(17000u16, 17000u16)
         .expect("Failed to set antenna delay");
 
     dw1000
@@ -71,19 +72,19 @@ fn main() -> ! {
     loop {
         let _ = user_led.toggle();
 
-        rprintln!("send ping...");
+        //rprintln!("send ping...");
         // send a ping to any nearby base stations
         let mut sending = ranging::Ping::new(&mut dw1000)
             .expect("Failed to initiate ping")
             .send(dw1000)
             .expect("Failed to initiate ping transmission");
-        rprintln!("start ping send...");
+        //rprintln!("start ping send...");
         nb::block!(sending.wait_transmit()).expect("Failed to send data");
-        rprintln!("wait ping finish...");
+        //rprintln!("wait ping finish...");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
 
         // wait to receive a ranging request from a base station
-        rprintln!("prep receiving");
+        //rprintln!("prep receiving");
         let mut receiving = dw1000
             .receive(RxConfig::default())
             .expect("Failed to receive message");
@@ -95,22 +96,22 @@ fn main() -> ! {
             .finish_receiving()
             .expect("Failed to finish receiving");
 
-        rprintln!("check msg...");
+        //rprintln!("check msg...");
         let message = match result {
             Ok(message) => message,
             Err(e) => {
-                rprintln!("Message err: {:?}", &e);
+                rprintln!("msg err: {:?}", &e);
                 continue;
             }
         };
 
         // Decode the ranging request and respond with a ranging response
-        rprintln!("decode range req");
+        //rprintln!("decode range req");
         let request =
             match ranging::Request::decode::<Spi1PortType, ChipSelectPinType>(&message) {
                 Ok(Some(request)) => request,
                 Ok(None) | Err(_) => {
-                    rprintln!("Ignoring message that is not a request");
+                    rprintln!("ignoring nonreq");
                     continue;
                 }
             };
@@ -124,11 +125,11 @@ fn main() -> ! {
             .send(dw1000)
             .expect("Failed to initiate response transmission");
 
-        rprintln!("start send range resp");
+        //rprintln!("start send range resp");
         nb::block!(sending.wait_transmit()).expect("Failed to send data");
-        rprintln!("finish range resp...");
+        //rprintln!("finish range resp...");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
 
-        delay_source.delay_ms(250u16);
+        delay_source.delay_ms(250u32);
     }
 }
