@@ -2,7 +2,7 @@
 name = "stm32f401ccu6-bsp"
 version = "0.1.1"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
-edition = "2018"
+edition = "2021"
 description = "Board support crate for the STM32F401CCU6 development board"
 license = "BSD-3-Clause"
 repository ="https://github.com/tstellanova/stm32f401ccu6-bsp"
@@ -10,8 +10,8 @@ repository ="https://github.com/tstellanova/stm32f401ccu6-bsp"
 [dependencies]
 cortex-m = "^0.6.0"
 embedded-hal = "0.2.3"
-stm32f4 = {version = "0.10.0", features = ["stm32f401"] }
-stm32f4xx-hal = { version ="0.8.2", features = ["stm32f401", "rt"]}
+stm32f4 = {version = "0.15.1", features = ["stm32f401"] }
+stm32f4xx-hal = { version ="0.13.2", features = ["stm32f401", "rt"]}
 
 [dev-dependencies]
 cortex-m-rt = "0.6.12"
@@ -20,5 +20,4 @@ ssd1306 = "0.3.1"
 embedded-graphics = "0.6.2"
 dw1000 = "0.6.0"
 nb = "1.0.0"
-
-
+#embedded-timeout-macros = "0.3.0"

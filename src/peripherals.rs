@@ -1,11 +1,15 @@
 use stm32f4xx_hal as p_hal;
+use stm32f4xx_hal::pac as pac;
 
-use p_hal::stm32 as pac;
-use p_hal::stm32::I2C1;
-
-use p_hal::gpio::GpioExt;
+use p_hal::gpio::{GpioExt};
 use p_hal::rcc::RccExt;
-use p_hal::time::U32Ext;
+use p_hal::timer::{Timer, TimerExt};
+use p_hal::timer::Timer10;
+use p_hal::timer::Delay;
+use p_hal::i2c::I2c1;
+use stm32f4::stm32f401::I2C1;
+use stm32f4xx_hal::time::{U32Ext, Hertz};
+
 
 pub fn setup_peripherals() -> (
     // LED output pin
@@ -14,6 +18,7 @@ pub fn setup_peripherals() -> (
     I2c1PortType,
     Spi1PortType,
     ChipSelectPinType,
+    TimeoutTimerType,
 ) {
     let dp = pac::Peripherals::take().unwrap();
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -22,13 +27,13 @@ pub fn setup_peripherals() -> (
     let rcc = dp.RCC.constrain();
     let clocks = rcc
         .cfgr
-        .use_hse(25.mhz()) //f401cb  board has 25 MHz crystal for HSE
-        .sysclk(84.mhz()) // f401cb supports 84 MHz sysclk max
-        .pclk1(48.mhz())
-        .pclk2(48.mhz())
+        .use_hse(25u32.mhz()) //f401cb  board has 25 MHz crystal for HSE
+        .sysclk(84u32.mhz()) // f401cb supports 84 MHz sysclk max
+        .pclk1(48u32.mhz())
+        .pclk2(48u32.mhz())
         .freeze();
 
-    let delay_source = p_hal::delay::Delay::new(cp.SYST, clocks);
+    let delay_source = Delay::new(cp.SYST, clocks);
 
     // let hclk = clocks.hclk();
     // let rng_clk = clocks.pll48clk().unwrap_or(0u32.hz());
@@ -51,13 +56,16 @@ pub fn setup_peripherals() -> (
     let i2c1_port = {
         let scl = gpiob
             .pb8
-            .into_alternate_af4()
+            .into_alternate(4)
+            //.into_alternate_af4()
             .internal_pull_up(true)
             .set_open_drain();
 
+
         let sda = gpiob
             .pb9
-            .into_alternate_af4()
+            .into_alternate(4)
+            //.into_alternate_af4()
             .internal_pull_up(true)
             .set_open_drain();
 
@@ -66,9 +74,9 @@ pub fn setup_peripherals() -> (
 
     let spi1_port = {
         // SPI1 port setup
-        let sck = gpioa.pa5.into_alternate_af5();
-        let miso = gpioa.pa6.into_alternate_af5();
-        let mosi = gpioa.pa7.into_alternate_af5();
+        let sck = gpioa.pa5.into_alternate(5); //_af5();
+        let miso = gpioa.pa6.into_alternate(5); //_af5();
+        let mosi = gpioa.pa7.into_alternate(5); //_af5();
 
         p_hal::spi::Spi::spi1(
             dp.SPI1,
@@ -85,23 +93,30 @@ pub fn setup_peripherals() -> (
     // HINTN interrupt pin
     // let hintn = gpiob.pb0.into_pull_up_input();
 
-    (user_led1, delay_source, i2c1_port, spi1_port, spi_csn)
+    let timeout_timer =
+        dp.TIM10.counter_ms(&clocks);
+        // p_hal::timer::Timer::tim10(dp.TIM10  ,1.hz(), clocks);
+
+
+        (user_led1, delay_source, i2c1_port, spi1_port, spi_csn, timeout_timer)
 }
 
 pub type I2c1PortType = p_hal::i2c::I2c<
-    I2C1,
+    pac::I2C1,
     (
-        p_hal::gpio::gpiob::PB8<p_hal::gpio::AlternateOD<p_hal::gpio::AF4>>,
-        p_hal::gpio::gpiob::PB9<p_hal::gpio::AlternateOD<p_hal::gpio::AF4>>,
+        // AF4
+        p_hal::gpio::gpiob::PB8<p_hal::gpio::Alternate<4>>,
+        p_hal::gpio::gpiob::PB9<p_hal::gpio::Alternate<4>>,
     ),
 >;
 
 pub type Spi1PortType = p_hal::spi::Spi<
     pac::SPI1,
     (
-        p_hal::gpio::gpioa::PA5<p_hal::gpio::Alternate<p_hal::gpio::AF5>>, //SCLK
-        p_hal::gpio::gpioa::PA6<p_hal::gpio::Alternate<p_hal::gpio::AF5>>, //MISO
-        p_hal::gpio::gpioa::PA7<p_hal::gpio::Alternate<p_hal::gpio::AF5>>, //MOSI
+        // AF5
+        p_hal::gpio::gpioa::PA5<p_hal::gpio::Alternate<5>>,//SCLK
+        p_hal::gpio::gpioa::PA6<p_hal::gpio::Alternate<5>>, //MISO
+        p_hal::gpio::gpioa::PA7<p_hal::gpio::Alternate<5>>, //MOSI
     ),
 >;
 
@@ -111,4 +126,6 @@ pub type ChipSelectPinType =
 pub type UserLed1Type =
     p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
-pub type DelaySourceType = p_hal::delay::Delay;
+pub type DelaySourceType = u32; //p_hal::timer::Delay;
+
+pub type TimeoutTimerType = Timer<Timer10>;
