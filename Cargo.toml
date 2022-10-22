@@ -9,15 +9,15 @@ repository ="https://github.com/tstellanova/stm32f401ccu6-bsp"
 
 [dependencies]
 cortex-m = "^0.6.0"
-embedded-hal = "0.2.3"
-stm32f4 = {version = "0.15.1", features = ["stm32f401"] }
+embedded-hal = "0.2.7"
 stm32f4xx-hal = { version ="0.13.2", features = ["stm32f401", "rt"]}
+fugit = "0.3.6"
 
 [dev-dependencies]
-cortex-m-rt = "0.6.12"
+cortex-m-rt = "^0.7"
 panic-rtt-core = "0.1.1"
 ssd1306 = "0.3.1"
 embedded-graphics = "0.6.2"
 dw1000 = "0.6.0"
 nb = "1.0.0"
-#embedded-timeout-macros = "0.3.0"
+embedded-timeout-macros = "0.3.0"

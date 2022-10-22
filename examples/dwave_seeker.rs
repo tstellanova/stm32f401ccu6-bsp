@@ -6,13 +6,14 @@ LICENSE: BSD3 (see LICENSE file)
 #![no_main]
 #![no_std]
 
-extern crate stm32f4xx_hal;
+// extern crate stm32f4xx_hal;
 
 use cortex_m_rt as rt;
 use rt::entry;
 use nb;
 
 use panic_rtt_core::{self, rprintln, rtt_init_print};
+use fugit::{RateExtU32};
 
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
@@ -21,14 +22,8 @@ use dw1000::{hl::DW1000, mac, RxConfig,
              ranging::{self, Message as _RangingMessage}
 };
 use stm32f401ccu6_bsp::peripherals::{Spi1PortType, ChipSelectPinType};
-use embedded_hal::prelude::_embedded_hal_timer_CountDown;
 
 use embedded_timeout_macros::{block_timeout};
-
-use stm32f4xx_hal::time::{U32Ext, Hertz};
-
-// use embedded_time::{duration::*, rate::*};
-use embedded_time::{duration::*, rate::*, Clo ck as _};
 
 
 #[entry]
@@ -43,8 +38,8 @@ fn main() -> ! {
         _i2c1_port,
         spi1_port,
         csn_pin,
-        mut timeout_timer) =
-        peripherals::setup_peripherals();
+        mut timeout_timer
+    ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
 
@@ -77,6 +72,7 @@ fn main() -> ! {
     let mut buffer2 = [0; 1024];
 
 
+
     rprintln!("start loop...");
     loop {
         let _ = user_led.toggle();
@@ -86,16 +82,15 @@ fn main() -> ! {
             .receive(RxConfig::default())
             .expect("Failed to receive message");
 
-        let micros = 1_000_000_u32.microseconds();
-        let millis: Milliseconds = micros.into();
-        let frequency: Result<Hertz,_> = millis.to_rate();
+        // let micros = 1_000_000_u32.microseconds();
+        // let millis: Milliseconds = micros.into();
+        // let frequency: Result<Hertz,_> = millis.to_rate();
 
-
-        timeout_timer.start(frequency.unwrap());
-
+        timeout_timer.start(1.Hz()).unwrap();
         let result =
             block_timeout!(&mut timeout_timer, receiving.wait_receive(&mut buffer1));
         // let message = nb::block!(receiving.wait_receive(&mut buffer1));
+
         dw1000 = receiving
             .finish_receiving()
             .expect("Failed to finish receiving");
@@ -189,6 +184,6 @@ fn main() -> ! {
             }
         }
         rprintln!("...");
-        // delay_source.delay_ms(250u32);
+        delay_source.delay_ms(250u32);
     }
 }

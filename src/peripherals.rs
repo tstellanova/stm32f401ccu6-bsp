@@ -3,12 +3,8 @@ use stm32f4xx_hal::pac as pac;
 
 use p_hal::gpio::{GpioExt};
 use p_hal::rcc::RccExt;
-use p_hal::timer::{Timer, TimerExt};
-use p_hal::timer::Timer10;
-use p_hal::timer::Delay;
-use p_hal::i2c::I2c1;
-use stm32f4::stm32f401::I2C1;
-use stm32f4xx_hal::time::{U32Ext, Hertz};
+use p_hal::timer::{SysTimerExt, counter::CounterHz, delay::SysDelay};
+use fugit::{RateExtU32};
 
 
 pub fn setup_peripherals() -> (
@@ -18,7 +14,7 @@ pub fn setup_peripherals() -> (
     I2c1PortType,
     Spi1PortType,
     ChipSelectPinType,
-    TimeoutTimerType,
+    TimeoutTimerType
 ) {
     let dp = pac::Peripherals::take().unwrap();
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -27,13 +23,14 @@ pub fn setup_peripherals() -> (
     let rcc = dp.RCC.constrain();
     let clocks = rcc
         .cfgr
-        .use_hse(25u32.mhz()) //f401cb  board has 25 MHz crystal for HSE
-        .sysclk(84u32.mhz()) // f401cb supports 84 MHz sysclk max
-        .pclk1(48u32.mhz())
-        .pclk2(48u32.mhz())
+        .use_hse(25u32.MHz()) //f401cb  board has 25 MHz crystal for HSE
+        .sysclk(84u32.MHz()) // f401cb supports 84 MHz sysclk max
+        .pclk1(48u32.MHz())
+        .pclk2(48u32.MHz())
         .freeze();
 
-    let delay_source = Delay::new(cp.SYST, clocks);
+    // let delay_source = SysDelay
+        // Delay::new(cp.SYST, clocks);
 
     // let hclk = clocks.hclk();
     // let rng_clk = clocks.pll48clk().unwrap_or(0u32.hz());
@@ -56,35 +53,33 @@ pub fn setup_peripherals() -> (
     let i2c1_port = {
         let scl = gpiob
             .pb8
-            .into_alternate(4)
-            //.into_alternate_af4()
+            .into_alternate::<4>()
             .internal_pull_up(true)
             .set_open_drain();
-
 
         let sda = gpiob
             .pb9
-            .into_alternate(4)
+            .into_alternate::<4>()
             //.into_alternate_af4()
             .internal_pull_up(true)
             .set_open_drain();
 
-        p_hal::i2c::I2c::i2c1(dp.I2C1, (scl, sda), 400.khz(), clocks)
+        p_hal::i2c::I2c1::new(dp.I2C1, (scl,sda), 400.kHz(), &clocks)
     };
 
     let spi1_port = {
         // SPI1 port setup
-        let sck = gpioa.pa5.into_alternate(5); //_af5();
-        let miso = gpioa.pa6.into_alternate(5); //_af5();
-        let mosi = gpioa.pa7.into_alternate(5); //_af5();
+        let sck = gpioa.pa5.into_alternate::<5>();
+        let miso = gpioa.pa6.into_alternate::<5>();
+        let mosi = gpioa.pa7.into_alternate::<5>();
 
-        p_hal::spi::Spi::spi1(
-            dp.SPI1,
+        p_hal::spi::Spi1::new(dp.SPI1,
             (sck, miso, mosi),
             embedded_hal::spi::MODE_0,
-            3_000_000.hz(),
-            clocks,
+            3.MHz(),
+            &clocks
         )
+
     };
 
     // SPI chip select CS
@@ -94,21 +89,27 @@ pub fn setup_peripherals() -> (
     // let hintn = gpiob.pb0.into_pull_up_input();
 
     let timeout_timer =
-        dp.TIM10.counter_ms(&clocks);
-        // p_hal::timer::Timer::tim10(dp.TIM10  ,1.hz(), clocks);
+        p_hal::timer::Timer::new(dp.TIM10, &clocks).counter_hz();
+      // p_hal::timer::Timer10::new(dp.TIM10,  &clocks);
+        //p_hal::timer::Timer::tim10(dp.TIM10  ,1.hz(), clocks);
 
 
-        (user_led1, delay_source, i2c1_port, spi1_port, spi_csn, timeout_timer)
+    (user_led1,
+     cortex_m::peripheral::SYST::delay(cp.SYST, &clocks),
+     i2c1_port,
+     spi1_port,
+     spi_csn,
+     timeout_timer)
 }
 
 pub type I2c1PortType = p_hal::i2c::I2c<
     pac::I2C1,
     (
-        // AF4
-        p_hal::gpio::gpiob::PB8<p_hal::gpio::Alternate<4>>,
-        p_hal::gpio::gpiob::PB9<p_hal::gpio::Alternate<4>>,
-    ),
->;
+        p_hal::gpio::gpiob::PB8<p_hal::gpio::Alternate<4, p_hal::gpio::OpenDrain>>,
+        p_hal::gpio::gpiob::PB9<p_hal::gpio::Alternate<4, p_hal::gpio::OpenDrain>>
+
+    )>;
+
 
 pub type Spi1PortType = p_hal::spi::Spi<
     pac::SPI1,
@@ -126,6 +127,6 @@ pub type ChipSelectPinType =
 pub type UserLed1Type =
     p_hal::gpio::gpioc::PC13<p_hal::gpio::Output<p_hal::gpio::PushPull>>;
 
-pub type DelaySourceType = u32; //p_hal::timer::Delay;
+pub type DelaySourceType = SysDelay;
 
-pub type TimeoutTimerType = Timer<Timer10>;
+pub type TimeoutTimerType = CounterHz<pac::TIM10>;
