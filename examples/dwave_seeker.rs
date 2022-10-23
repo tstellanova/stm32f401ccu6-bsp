@@ -16,7 +16,6 @@ use panic_rtt_core::{self, rprintln, rtt_init_print};
 use fugit::{RateExtU32};
 
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use stm32f401ccu6_bsp::peripherals;
 use dw1000::{hl::DW1000, mac, RxConfig,
              ranging::{self, Message as _RangingMessage}

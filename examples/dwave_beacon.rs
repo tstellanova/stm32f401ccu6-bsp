@@ -13,7 +13,6 @@ use nb;
 use panic_rtt_core::{self, rprintln, rtt_init_print};
 
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use stm32f401ccu6_bsp::peripherals;
 use dw1000::{ hl::DW1000, mac,  RxConfig,
               ranging::{self, Message as _RangingMessage}
@@ -35,9 +34,11 @@ fn main() -> ! {
 
     let (mut user_led,
         mut delay_source,
-        _i2c1_port, spi1_port,
-        csn_pin) =
-        peripherals::setup_peripherals();
+        _i2c1_port,
+        spi1_port,
+        csn_pin,
+        mut _timeout_timer
+    ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
 
