@@ -15,6 +15,9 @@ use embedded_hal::blocking::delay::DelayMs;
 use stm32f401ccu6_bsp::peripherals;
 
 
+static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
+
+
 #[entry]
 fn main() -> ! {
     rtt_init_print!(NoBlockTrim);
@@ -25,7 +28,8 @@ fn main() -> ! {
         _i2c1_port,
         _spi1_port,
         _csn_pin,
-        mut _timeout_timer
+        mut _timeout_timer,
+        _irq_pin,
     ) = peripherals::setup_peripherals();
 
     let _ = user_led.set_high();

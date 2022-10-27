@@ -1,7 +1,8 @@
 use stm32f4xx_hal as p_hal;
 use stm32f4xx_hal::pac as pac;
-
-use p_hal::gpio::{GpioExt};
+// use p_hal::prelude::*;
+use p_hal::syscfg::SysCfgExt;
+use p_hal::gpio::{ GpioExt, Edge, ExtiPin};
 use p_hal::rcc::RccExt;
 use p_hal::timer::{SysTimerExt, counter::CounterHz, delay::SysDelay};
 use fugit::{RateExtU32};
@@ -14,10 +15,12 @@ pub fn setup_peripherals() -> (
     I2c1PortType,
     Spi1PortType,
     ChipSelectPinType,
-    TimeoutTimerType
+    TimeoutTimerType,
+    Irq1PinType,
 ) {
-    let dp = pac::Peripherals::take().unwrap();
+    let mut dp = pac::Peripherals::take().unwrap();
     let cp = cortex_m::Peripherals::take().unwrap();
+    let mut syscfg = dp.SYSCFG.constrain();
 
     // Set up the system clock
     let rcc = dp.RCC.constrain();
@@ -93,13 +96,26 @@ pub fn setup_peripherals() -> (
       // p_hal::timer::Timer10::new(dp.TIM10,  &clocks);
         //p_hal::timer::Timer::tim10(dp.TIM10  ,1.hz(), clocks);
 
+    //
+    let mut irq_pin = gpiob.pb10.into_pull_down_input(); //f401CxUx
+    irq_pin.make_interrupt_source(&mut syscfg);
+    irq_pin.trigger_on_edge(&mut dp.EXTI, Edge::Rising);
+    irq_pin.enable_interrupt(&mut dp.EXTI);
+
+    pac::NVIC::unpend(irq_pin.interrupt());
+    unsafe {
+        pac::NVIC::unmask(irq_pin.interrupt());
+    };
+
 
     (user_led1,
      cortex_m::peripheral::SYST::delay(cp.SYST, &clocks),
      i2c1_port,
      spi1_port,
      spi_csn,
-     timeout_timer)
+     timeout_timer,
+     irq_pin
+    )
 }
 
 pub type I2c1PortType = p_hal::i2c::I2c<
@@ -130,3 +146,6 @@ pub type UserLed1Type =
 pub type DelaySourceType = SysDelay;
 
 pub type TimeoutTimerType = CounterHz<pac::TIM10>;
+
+pub type Irq1PinType = stm32f4xx_hal::gpio::Pin<'B', 10>;
+

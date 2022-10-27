@@ -11,13 +11,17 @@ use rt::entry;
 use nb;
 
 use panic_rtt_core::{self, rprintln, rtt_init_print};
-
+use core::cell::{Cell, RefCell};
+use cortex_m::interrupt::Mutex;
 use embedded_hal::blocking::delay::DelayMs;
-use stm32f401ccu6_bsp::peripherals;
 use dw1000::{ hl::DW1000, mac,  RxConfig,
               ranging::{self, Message as _RangingMessage}
 };
-use stm32f401ccu6_bsp::peripherals::{Spi1PortType, ChipSelectPinType};
+// use stm32f401ccu6_bsp::peripherals;
+use stm32f401ccu6_bsp::peripherals::{self, Spi1PortType, ChipSelectPinType, Irq1PinType};
+
+static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
+
 
 
 /**
@@ -37,7 +41,8 @@ fn main() -> ! {
         _i2c1_port,
         spi1_port,
         csn_pin,
-        mut _timeout_timer
+        mut _timeout_timer,
+        irq_pin
     ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
@@ -79,8 +84,15 @@ fn main() -> ! {
             .expect("Failed to initiate ping")
             .send(dw1000)
             .expect("Failed to initiate ping transmission");
-        //rprintln!("start ping send...");
-        nb::block!(sending.wait_transmit()).expect("Failed to send data");
+        rprintln!("start ping send...");
+        timeout_timer.start(100_000u32);
+        nb::block!({
+                irq_pin.wait_for_interrupts(&mut gpiote, &mut timeout_timer);
+                sending.wait_transmit()
+            })
+            .expect("Failed to send ping");
+
+        //nb::block!(sending.wait_transmit()).expect("Failed to send data");
         //rprintln!("wait ping finish...");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
 
@@ -133,4 +145,9 @@ fn main() -> ! {
 
         delay_source.delay_ms(250u32);
     }
+}
+
+#[interrupt]
+fn EXTI15_10() {
+    // Interrupt Service Routine Code
 }

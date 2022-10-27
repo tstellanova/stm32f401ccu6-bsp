@@ -6,9 +6,11 @@ LICENSE: BSD3 (see LICENSE file)
 #![no_main]
 #![no_std]
 
-// extern crate stm32f4xx_hal;
 
 use cortex_m_rt as rt;
+use core::cell::{Cell, RefCell};
+use cortex_m::interrupt::Mutex;
+
 use rt::entry;
 use nb;
 
@@ -20,9 +22,12 @@ use stm32f401ccu6_bsp::peripherals;
 use dw1000::{hl::DW1000, mac, RxConfig,
              ranging::{self, Message as _RangingMessage}
 };
-use stm32f401ccu6_bsp::peripherals::{Spi1PortType, ChipSelectPinType};
+use stm32f401ccu6_bsp::peripherals::{Spi1PortType, ChipSelectPinType, Irq1PinType};
+
+static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
 
 use embedded_timeout_macros::{block_timeout};
+
 
 
 #[entry]
@@ -37,7 +42,8 @@ fn main() -> ! {
         _i2c1_port,
         spi1_port,
         csn_pin,
-        mut timeout_timer
+        mut timeout_timer,
+        irq_pin
     ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
@@ -89,6 +95,12 @@ fn main() -> ! {
         let result =
             block_timeout!(&mut timeout_timer, receiving.wait_receive(&mut buffer1));
         // let message = nb::block!(receiving.wait_receive(&mut buffer1));
+
+        timeout_timer.start(500_000u32);
+        let message = block_timeout!(&mut timeout_timer, {
+            irq_pin.wait_for_interrupts(&mut gpiote, &mut timeout_timer);
+            receiving.wait_receive(&mut buf)
+        });
 
         dw1000 = receiving
             .finish_receiving()
@@ -185,4 +197,9 @@ fn main() -> ! {
         rprintln!("...");
         delay_source.delay_ms(250u32);
     }
+}
+
+#[interrupt]
+fn EXTI15_10() {
+    // Interrupt Service Routine Code
 }
