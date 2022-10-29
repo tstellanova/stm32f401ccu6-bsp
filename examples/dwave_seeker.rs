@@ -8,25 +8,28 @@ LICENSE: BSD3 (see LICENSE file)
 
 
 use cortex_m_rt as rt;
-use core::cell::{Cell, RefCell};
+use core::cell::{RefCell};
 use cortex_m::interrupt::Mutex;
+use core::sync::atomic::{AtomicBool, Ordering};
+use stm32f4xx_hal::{
+    pac::interrupt,
+    gpio::ExtiPin,
+};
 
 use rt::entry;
 use nb;
 
 use panic_rtt_core::{self, rprintln, rtt_init_print};
-use fugit::{RateExtU32};
 
 use embedded_hal::blocking::delay::DelayMs;
-use stm32f401ccu6_bsp::peripherals;
 use dw1000::{hl::DW1000, mac, RxConfig,
              ranging::{self, Message as _RangingMessage}
 };
-use stm32f401ccu6_bsp::peripherals::{Spi1PortType, ChipSelectPinType, Irq1PinType};
+use stm32f401ccu6_bsp::peripherals::{self, Spi1PortType, ChipSelectPinType, Irq1PinType};
+
 
 static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
-
-use embedded_timeout_macros::{block_timeout};
+static G_FLIPPIN_STATE:AtomicBool  = AtomicBool::new(false);
 
 
 
@@ -42,11 +45,15 @@ fn main() -> ! {
         _i2c1_port,
         spi1_port,
         csn_pin,
-        mut timeout_timer,
+        _timeout_timer,
         irq_pin
     ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
+
+    cortex_m::interrupt::free(|cs| {
+        G_IRQ1_PIN.borrow(cs).replace(Some(irq_pin));
+    });
 
     let mut dw1000 =
         DW1000::new(spi1_port, csn_pin)
@@ -76,35 +83,25 @@ fn main() -> ! {
     let mut buffer1 = [0; 1024];
     let mut buffer2 = [0; 1024];
 
-
-
-    rprintln!("start loop...");
     loop {
-        let _ = user_led.toggle();
-        delay_source.delay_ms(500u32);
+        let _ = user_led.set_high();
+        rprintln!("seeker loop");
+        delay_source.delay_ms(250u32);
 
+        rprintln!("wait_receive pingreq...");
         let mut receiving = dw1000
             .receive(RxConfig::default())
-            .expect("Failed to receive message");
-
-        // let micros = 1_000_000_u32.microseconds();
-        // let millis: Milliseconds = micros.into();
-        // let frequency: Result<Hertz,_> = millis.to_rate();
-
-        timeout_timer.start(1.Hz()).unwrap();
-        let result =
-            block_timeout!(&mut timeout_timer, receiving.wait_receive(&mut buffer1));
-        // let message = nb::block!(receiving.wait_receive(&mut buffer1));
-
-        timeout_timer.start(500_000u32);
-        let message = block_timeout!(&mut timeout_timer, {
-            irq_pin.wait_for_interrupts(&mut gpiote, &mut timeout_timer);
-            receiving.wait_receive(&mut buf)
-        });
-
-        dw1000 = receiving
-            .finish_receiving()
-            .expect("Failed to finish receiving");
+            .expect("Failed to start receive");
+        //actually receive a message
+        let result = nb::block!({
+                while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+                    cortex_m::asm::wfi(); // wait for any interrupt
+                }
+                G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+                receiving.wait_receive(&mut buffer1)
+            });
+        dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
+        rprintln!("recvd pingreq");
 
         let message = match result {
             Ok(message) => message,
@@ -128,6 +125,7 @@ fn main() -> ! {
             }
         };
 
+        rprintln!("decode ping...");
         let (pinger_pan_id, pinger_addr) = match ping.source {
             Some(mac::Address::Short(pan_id, addr)) => (pan_id, addr),
             _ => continue,
@@ -135,20 +133,37 @@ fn main() -> ! {
         rprintln!("ping < {:04x}:{:04x}", pinger_pan_id.0, pinger_addr.0);
 
         //wait for pinger to switch over to listening for range request
-        delay_source.delay_ms(10u32);
+        delay_source.delay_ms(25u32);
 
+        let _ = user_led.set_low();
         let mut sending = ranging::Request::new(&mut dw1000, &ping)
             .expect("Failed range req initiate")
             .send(dw1000)
             .expect("Failed to initiate request xmit");
 
-        nb::block!(sending.wait_transmit()).expect("Failed to send data");
+        rprintln!("wait_transmit range_req...");
+        nb::block!({
+            // while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+            //     cortex_m::asm::wfi(); // wait for any interrupt
+            // }
+            // G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+            sending.wait_transmit()
+        }).expect("Failed to send data");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
+
+        // receive ranging response
+        let _ = user_led.set_high();
         let mut receiving = dw1000
             .receive(RxConfig::default())
             .expect("Failed to receive message");
-
-        let result = nb::block!(receiving.wait_receive(&mut buffer2));
+        rprintln!("wait_receive range resp ...");
+        let result = nb::block!({
+            while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+                cortex_m::asm::wfi(); // wait for any interrupt
+            }
+            G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+            receiving.wait_receive(&mut buffer2)
+        });
         dw1000 = receiving
             .finish_receiving()
             .expect("Failed to finish receiving");
@@ -181,7 +196,7 @@ fn main() -> ! {
             _ => continue,
         };
 
-        //rprintln!("compute distance...");
+        rprintln!("compute distance...");
         // Ranging response received. Compute distance.
         match ranging::compute_distance_mm(&response) {
             Ok(distance_mm) => {
@@ -202,4 +217,11 @@ fn main() -> ! {
 #[interrupt]
 fn EXTI15_10() {
     // Interrupt Service Routine Code
+    G_FLIPPIN_STATE.store(true, Ordering::Relaxed);
+
+    cortex_m::interrupt::free(|cs| {
+        // Obtain access to Global Button Peripheral and Clear Interrupt Pending Flag
+        let mut irq_pin = G_IRQ1_PIN.borrow(cs).borrow_mut();
+        irq_pin.as_mut().unwrap().clear_interrupt_pending_bit();
+    });
 }

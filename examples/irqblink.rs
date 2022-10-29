@@ -23,8 +23,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use cortex_m::interrupt::Mutex;
 use core::cell::RefCell;
 
-// use stm32f4xx_hal::gpio::ExtiPin;
-
 use stm32f4xx_hal::{
     pac::interrupt,
     gpio::ExtiPin,

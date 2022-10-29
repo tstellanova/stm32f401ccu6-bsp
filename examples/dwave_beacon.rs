@@ -11,8 +11,14 @@ use rt::entry;
 use nb;
 
 use panic_rtt_core::{self, rprintln, rtt_init_print};
-use core::cell::{Cell, RefCell};
+use core::cell::{RefCell};
 use cortex_m::interrupt::Mutex;
+use core::sync::atomic::{AtomicBool, Ordering};
+use stm32f4xx_hal::{
+    pac::interrupt,
+    gpio::ExtiPin,
+};
+
 use embedded_hal::blocking::delay::DelayMs;
 use dw1000::{ hl::DW1000, mac,  RxConfig,
               ranging::{self, Message as _RangingMessage}
@@ -21,6 +27,7 @@ use dw1000::{ hl::DW1000, mac,  RxConfig,
 use stm32f401ccu6_bsp::peripherals::{self, Spi1PortType, ChipSelectPinType, Irq1PinType};
 
 static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
+static G_FLIPPIN_STATE:AtomicBool  = AtomicBool::new(false);
 
 
 
@@ -46,6 +53,11 @@ fn main() -> ! {
     ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
+
+    cortex_m::interrupt::free(|cs| {
+        G_IRQ1_PIN.borrow(cs).replace(Some(irq_pin));
+    });
+
 
     let mut dw1000 =
         DW1000::new(spi1_port, csn_pin)
@@ -74,42 +86,45 @@ fn main() -> ! {
 
     let mut buffer = [0; 1024];
 
-    rprintln!("start loop...");
     loop {
-        let _ = user_led.toggle();
+        let _ = user_led.set_high();
+        rprintln!("beacon loop");
+        delay_source.delay_ms(250u32);
 
-        //rprintln!("send ping...");
+        let _ = user_led.set_low();
+        rprintln!("send ping...");
         // send a ping to any nearby base stations
         let mut sending = ranging::Ping::new(&mut dw1000)
             .expect("Failed to initiate ping")
             .send(dw1000)
             .expect("Failed to initiate ping transmission");
-        rprintln!("start ping send...");
-        timeout_timer.start(100_000u32);
         nb::block!({
-                irq_pin.wait_for_interrupts(&mut gpiote, &mut timeout_timer);
-                sending.wait_transmit()
-            })
-            .expect("Failed to send ping");
-
-        //nb::block!(sending.wait_transmit()).expect("Failed to send data");
-        //rprintln!("wait ping finish...");
+            // while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+            //     cortex_m::asm::wfi(); // wait for any interrupt
+            // }
+            // G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+            sending.wait_transmit()
+            }).expect("Failed to send ping");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
+        rprintln!("ping sent");
 
         // wait to receive a ranging request from a base station
-        //rprintln!("prep receiving");
+        let _ = user_led.set_high();
+        rprintln!("start recv range req");
         let mut receiving = dw1000
             .receive(RxConfig::default())
             .expect("Failed to receive message");
+        //TODO this gets stuck waiting for a range resp that never comes -- need to retry ping sooner
+        let result = nb::block!({
+            while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+                cortex_m::asm::wfi(); // wait for any interrupt
+            }
+            G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+            receiving.wait_receive(&mut buffer)
+        });
+        dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
+        rprintln!("received range req");
 
-        //rprintln!("start recv...");
-        let result = nb::block!(receiving.wait_receive(&mut buffer));
-        //rprintln!("finish recv...");
-        dw1000 = receiving
-            .finish_receiving()
-            .expect("Failed to finish receiving");
-
-        //rprintln!("check msg...");
         let message = match result {
             Ok(message) => message,
             Err(e) => {
@@ -119,7 +134,7 @@ fn main() -> ! {
         };
 
         // Decode the ranging request and respond with a ranging response
-        //rprintln!("decode range req");
+        rprintln!("decode range req");
         let request =
             match ranging::Request::decode::<Spi1PortType, ChipSelectPinType>(&message) {
                 Ok(Some(request)) => request,
@@ -132,22 +147,33 @@ fn main() -> ! {
         delay_source.delay_ms(10u32);
 
         // Send ranging response
-        rprintln!("setup range resp");
+        let _ = user_led.set_low();
+        rprintln!("send range resp");
         let mut sending = ranging::Response::new(&mut dw1000, &request)
             .expect("Failed to initiate response")
             .send(dw1000)
             .expect("Failed to initiate response transmission");
-
-        //rprintln!("start send range resp");
-        nb::block!(sending.wait_transmit()).expect("Failed to send data");
+        nb::block!({
+            // while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
+            //     cortex_m::asm::wfi(); // wait for any interrupt
+            // }
+            // G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
+            sending.wait_transmit()
+        }).expect("Failed to send data");
         //rprintln!("finish range resp...");
         dw1000 = sending.finish_sending().expect("Failed to finish sending");
 
-        delay_source.delay_ms(250u32);
     }
 }
 
 #[interrupt]
 fn EXTI15_10() {
     // Interrupt Service Routine Code
+    G_FLIPPIN_STATE.store(true, Ordering::Relaxed);
+
+    cortex_m::interrupt::free(|cs| {
+        // Obtain access to Global Button Peripheral and Clear Interrupt Pending Flag
+        let mut irq_pin = G_IRQ1_PIN.borrow(cs).borrow_mut();
+        irq_pin.as_mut().unwrap().clear_interrupt_pending_bit();
+    });
 }
