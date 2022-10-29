@@ -4,9 +4,9 @@ use stm32f4xx_hal::pac as pac;
 use p_hal::syscfg::SysCfgExt;
 use p_hal::gpio::{ GpioExt, Edge, ExtiPin};
 use p_hal::rcc::RccExt;
-use p_hal::timer::{SysTimerExt, counter::CounterHz, delay::SysDelay};
+use p_hal::timer::{TimerExt, SysTimerExt,  delay::SysDelay};
 use fugit::{RateExtU32};
-
+use p_hal::timer::counter::{CounterHz};
 
 pub fn setup_peripherals() -> (
     // LED output pin
@@ -27,13 +27,10 @@ pub fn setup_peripherals() -> (
     let clocks = rcc
         .cfgr
         .use_hse(25u32.MHz()) //f401cb  board has 25 MHz crystal for HSE
-        .sysclk(84u32.MHz()) // f401cb supports 84 MHz sysclk max
+        .sysclk(84u32.MHz()) //f401cb supports 84 MHz sysclk max
         .pclk1(48u32.MHz())
         .pclk2(48u32.MHz())
         .freeze();
-
-    // let delay_source = SysDelay
-        // Delay::new(cp.SYST, clocks);
 
     // let hclk = clocks.hclk();
     // let rng_clk = clocks.pll48clk().unwrap_or(0u32.hz());
@@ -91,10 +88,11 @@ pub fn setup_peripherals() -> (
     // HINTN interrupt pin
     // let hintn = gpiob.pb0.into_pull_up_input();
 
-    let timeout_timer =
-        p_hal::timer::Timer::new(dp.TIM10, &clocks).counter_hz();
-      // p_hal::timer::Timer10::new(dp.TIM10,  &clocks);
-        //p_hal::timer::Timer::tim10(dp.TIM10  ,1.hz(), clocks);
+    let delay_source =  cortex_m::peripheral::SYST::delay(cp.SYST, &clocks);
+    let timeout_timer = dp.TIM2.counter_hz(&clocks);
+
+    // let timeout_timer =
+    //     p_hal::timer::Timer::new(Timer2, &clocks).counter_hz();
 
     //
     let mut irq_pin = gpiob.pb10.into_pull_down_input(); //f401CxUx
@@ -102,6 +100,7 @@ pub fn setup_peripherals() -> (
     irq_pin.trigger_on_edge(&mut dp.EXTI, Edge::Rising);
     irq_pin.enable_interrupt(&mut dp.EXTI);
 
+    pac::NVIC::unpend(p_hal::pac::Interrupt::TIM2);
     pac::NVIC::unpend(irq_pin.interrupt());
     unsafe {
         pac::NVIC::unmask(irq_pin.interrupt());
@@ -109,7 +108,7 @@ pub fn setup_peripherals() -> (
 
 
     (user_led1,
-     cortex_m::peripheral::SYST::delay(cp.SYST, &clocks),
+     delay_source,
      i2c1_port,
      spi1_port,
      spi_csn,
@@ -145,7 +144,7 @@ pub type UserLed1Type =
 
 pub type DelaySourceType = SysDelay;
 
-pub type TimeoutTimerType = CounterHz<pac::TIM10>;
+pub type TimeoutTimerType = CounterHz<pac::TIM2>;
 
 pub type Irq1PinType = stm32f4xx_hal::gpio::Pin<'B', 10>;
 

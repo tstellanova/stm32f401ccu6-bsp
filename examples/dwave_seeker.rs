@@ -9,12 +9,17 @@ LICENSE: BSD3 (see LICENSE file)
 
 use cortex_m_rt as rt;
 use core::cell::{RefCell};
+use core::ops::DerefMut;
 use cortex_m::interrupt::Mutex;
 use core::sync::atomic::{AtomicBool, Ordering};
-use stm32f4xx_hal::{
+use stm32f4xx_hal as p_hal;
+use p_hal::{
     pac::interrupt,
     gpio::ExtiPin,
+    timer::{CounterHz, Event}
 };
+use p_hal::pac as pac;
+use fugit::{RateExtU32};
 
 use rt::entry;
 use nb;
@@ -29,7 +34,9 @@ use stm32f401ccu6_bsp::peripherals::{self, Spi1PortType, ChipSelectPinType, Irq1
 
 
 static G_IRQ1_PIN: Mutex<RefCell<Option<Irq1PinType>>> = Mutex::new(RefCell::new(None));
-static G_FLIPPIN_STATE:AtomicBool  = AtomicBool::new(false);
+static G_DW_TRIGGER:AtomicBool  = AtomicBool::new(false);
+static TIMER_TIM2: Mutex<RefCell<Option<CounterHz<pac::TIM2>>>> = Mutex::new(RefCell::new(None));
+static G_TIM2_TRIGGER:AtomicBool  = AtomicBool::new(false);
 
 
 
@@ -45,13 +52,14 @@ fn main() -> ! {
         _i2c1_port,
         spi1_port,
         csn_pin,
-        _timeout_timer,
+        timeout_timer,
         irq_pin
     ) =   peripherals::setup_peripherals();
 
     let _ = user_led.set_high();
 
     cortex_m::interrupt::free(|cs| {
+        TIMER_TIM2.borrow(cs).replace(Some(timeout_timer));
         G_IRQ1_PIN.borrow(cs).replace(Some(irq_pin));
     });
 
@@ -85,38 +93,33 @@ fn main() -> ! {
 
     loop {
         let _ = user_led.set_high();
-        rprintln!("seeker loop");
-        delay_source.delay_ms(250u32);
+        // rprintln!("seeker loop");
+        delay_source.delay_ms(100u32);
 
-        rprintln!("wait_receive pingreq...");
-        let mut receiving = dw1000
-            .receive(RxConfig::default())
-            .expect("Failed to start receive");
-        //actually receive a message
-        let result = nb::block!({
-                while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
-                    cortex_m::asm::wfi(); // wait for any interrupt
-                }
-                G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
-                receiving.wait_receive(&mut buffer1)
-            });
-        dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
-        rprintln!("recvd pingreq");
+        // rprintln!("wait pingreq...");
+        let mut receiving = dw1000.receive(RxConfig::default()).expect("recv1 startfail");
+        if !wait_for_trigger_or_timeout(4) {
+            dw1000 = receiving.finish_receiving().expect("recv1 timeout finish");
+            continue;
+        }
+        let result = nb::block!(  receiving.wait_receive(&mut buffer1) );
+        dw1000 = receiving.finish_receiving().expect("recv1 finish");
 
         let message = match result {
             Ok(message) => message,
             Err(e) => {
                 rprintln!("msg err: {:?}", &e);
-                delay_source.delay_ms(500u32);
+                delay_source.delay_ms(250u32);
                 continue;
             }
         };
 
         // Assume this message was a ping and try to decode it
+        // rprintln!("recvd pingreq");
         let ping = match ranging::Ping::decode::<Spi1PortType, ChipSelectPinType>(&message) {
             Ok(Some(ping)) => ping,
             Ok(None) => {
-                rprintln!("Failed to decode ping");
+                rprintln!("empty ping");
                 continue;
             }
             Err(e) => {
@@ -125,10 +128,13 @@ fn main() -> ! {
             }
         };
 
-        rprintln!("decode ping...");
+        // rprintln!("decode ping...");
         let (pinger_pan_id, pinger_addr) = match ping.source {
             Some(mac::Address::Short(pan_id, addr)) => (pan_id, addr),
-            _ => continue,
+            _ => {
+                rprintln!("strange ping");
+                continue
+            },
         };
         rprintln!("ping < {:04x}:{:04x}", pinger_pan_id.0, pinger_addr.0);
 
@@ -137,36 +143,26 @@ fn main() -> ! {
 
         let _ = user_led.set_low();
         let mut sending = ranging::Request::new(&mut dw1000, &ping)
-            .expect("Failed range req initiate")
+            .expect("ranging new")
             .send(dw1000)
-            .expect("Failed to initiate request xmit");
+            .expect("ranging send");
 
-        rprintln!("wait_transmit range_req...");
+        //rprintln!("wait_transmit range_req...");
         nb::block!({
-            // while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
-            //     cortex_m::asm::wfi(); // wait for any interrupt
-            // }
-            // G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
             sending.wait_transmit()
-        }).expect("Failed to send data");
-        dw1000 = sending.finish_sending().expect("Failed to finish sending");
+        }).expect("ranging xmit");
+        dw1000 = sending.finish_sending().expect("ranging xmit finish");
 
         // receive ranging response
         let _ = user_led.set_high();
-        let mut receiving = dw1000
-            .receive(RxConfig::default())
-            .expect("Failed to receive message");
-        rprintln!("wait_receive range resp ...");
-        let result = nb::block!({
-            while !G_FLIPPIN_STATE.load(Ordering::Relaxed) { //limits scope to just irq_pin
-                cortex_m::asm::wfi(); // wait for any interrupt
-            }
-            G_FLIPPIN_STATE.store(false, Ordering::Relaxed);
-            receiving.wait_receive(&mut buffer2)
-        });
-        dw1000 = receiving
-            .finish_receiving()
-            .expect("Failed to finish receiving");
+        let mut receiving = dw1000.receive(RxConfig::default()).expect("resp rcv");
+        // rprintln!("wait_receive range resp ...");
+        if !wait_for_trigger_or_timeout(2) {
+            dw1000 = receiving.finish_receiving().expect("resp rcv timeout finish");
+            continue;
+        }
+        let result = nb::block!(  receiving.wait_receive(&mut buffer2) );
+        dw1000 = receiving.finish_receiving().expect("resp rcv finish");
 
         let message = match result {
             Ok(message) => message,
@@ -196,7 +192,7 @@ fn main() -> ! {
             _ => continue,
         };
 
-        rprintln!("compute distance...");
+        // rprintln!("compute distance...");
         // Ranging response received. Compute distance.
         match ranging::compute_distance_mm(&response) {
             Ok(distance_mm) => {
@@ -210,18 +206,70 @@ fn main() -> ! {
             }
         }
         rprintln!("...");
-        delay_source.delay_ms(250u32);
+        // delay_source.delay_ms(250u32);
     }
 }
 
+fn wait_for_trigger_or_timeout(rate_hz: u32) -> bool  {
+    let mut success: bool = false;
+
+    cortex_m::interrupt::free(|cs| {
+        if let Some(ref mut tim2) = TIMER_TIM2.borrow(cs).borrow_mut().deref_mut() {
+            tim2.clear_interrupt(Event::Update);
+            let _start_rc = tim2.start(rate_hz.Hz());
+            tim2.listen(Event::Update);
+        }
+    });
+
+    pac::NVIC::unpend(pac::Interrupt::TIM2);
+    unsafe {
+        pac::NVIC::unmask(pac::Interrupt::TIM2);
+    }
+
+    loop {
+        //wait for either an exti pin interrupt or timer interrupt
+        cortex_m::asm::wfi();
+        if G_DW_TRIGGER.load(Ordering::Relaxed) {
+            // the exti pin triggered
+            G_DW_TRIGGER.store(false, Ordering::Relaxed);
+            success = true;
+            break;
+        }
+        else if G_TIM2_TRIGGER.load(Ordering::Relaxed) {
+            // TIM2 expired trigger
+            G_TIM2_TRIGGER.store(false, Ordering::Relaxed);
+
+            // timeout before the exti pin triggered
+            success = false;
+            break;
+        }
+    }
+    pac::NVIC::mask(pac::Interrupt::TIM2);
+
+    return success;
+
+}
+
+
 #[interrupt]
 fn EXTI15_10() {
-    // Interrupt Service Routine Code
-    G_FLIPPIN_STATE.store(true, Ordering::Relaxed);
+    G_DW_TRIGGER.store(true, Ordering::Relaxed);
 
     cortex_m::interrupt::free(|cs| {
         // Obtain access to Global Button Peripheral and Clear Interrupt Pending Flag
         let mut irq_pin = G_IRQ1_PIN.borrow(cs).borrow_mut();
         irq_pin.as_mut().unwrap().clear_interrupt_pending_bit();
+    });
+}
+
+
+#[interrupt]
+fn TIM2() {
+    G_TIM2_TRIGGER.store(true, Ordering::Relaxed);
+
+    cortex_m::interrupt::free(|cs| {
+        if let Some(ref mut tim2) = TIMER_TIM2.borrow(cs).borrow_mut().deref_mut() {
+            tim2.clear_interrupt(Event::Update);
+        }
     });
 }
