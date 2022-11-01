@@ -3,6 +3,12 @@ Copyright (c) 2022 Todd Stellanova
 LICENSE: BSD3 (see LICENSE file)
 */
 
+//!
+//! Anchors are placed in known locations to enable range measurements.
+//! Anchors periodically send out pings.
+//! Anchors listen to "ranging requests" in response to pings they send.
+//! When an anchor receives a ranging request, it replies with a ranging response.
+//!
 #![no_main]
 #![no_std]
 
@@ -94,11 +100,14 @@ fn main() -> ! {
         )
         .expect("Failed to set address");
 
-    let mut buffer = [0; 1024];
+    let mut buffer = [0u8; 1024];
+    let mut loop_count: u32 = 0;
 
     loop {
         let _ = user_led.set_high();
-        rprintln!("beacon loop");
+        rprintln!("anchor loop {}", loop_count);
+        loop_count += 1;
+        delay_source.delay_ms(125u32);
 
         let _ = user_led.set_low();
         // rprintln!("send ping...");
@@ -109,61 +118,55 @@ fn main() -> ! {
             .expect("ping send");
         nb::block!({ sending.wait_transmit() }).expect("ping xmit");
         dw1000 = sending.finish_sending().expect("ping xmit finish");
-        rprintln!("ping sent");
+        // rprintln!("ping sent");
 
-        // wait to receive a ranging request from a base station
+        // wait to receive a ranging request from a seeker
         let _ = user_led.set_high();
         // rprintln!("start recv range req");
-        let mut receiving = dw1000.receive(RxConfig::default()).expect("recv1 start");
-        if !wait_for_trigger_or_timeout(8) {
-            rprintln!("recv1 timeout");
-            dw1000 = receiving.finish_receiving().expect("recv1 timeout finish");
-            delay_source.delay_ms(100u32);
-            continue;
-        }
+        let mut receiving = dw1000.receive(RxConfig::default()).expect("rcv1 start");
         if !wait_for_trigger_or_timeout(4) {
-            rprintln!("recv2 timeout");
-            dw1000 = receiving.finish_receiving().expect("recv2 timeout finish");
-            delay_source.delay_ms(100u32);
-            continue;
+            // rprintln!("rcv1 timeout {}", loop_count);
+            dw1000 = receiving.finish_receiving().expect("rcv1 timeout finish");
+            continue ;
         }
-        rprintln!("recv2 go");
+
         let result = nb::block!(  receiving.wait_receive(&mut buffer)  );
-        dw1000 = receiving.finish_receiving().expect("recv1 finish");
-        rprintln!("recv2 done");
+        dw1000 = receiving.finish_receiving().expect("recv finish");
+        // rprintln!("recv done");
 
         let message = match result {
             Ok(message) => message,
             Err(e) => {
                 rprintln!("msg err: {:?}", &e);
-                continue;
+                continue ;
             }
         };
 
         // Decode the ranging request and respond with a ranging response
         // rprintln!("decode range req");
-        let request =
+        let range_req =
             match ranging::Request::decode::<Spi1PortType, ChipSelectPinType>(&message) {
                 Ok(Some(request)) => request,
                 Ok(None) | Err(_) => {
-                    rprintln!("ignoring nonreq");
-                    continue;
+                    rprintln!("ignoring nonreq {}", loop_count);
+                    continue ;
                 }
             };
 
+        // wait for seeker to switchover to receiving
         delay_source.delay_ms(25u32);
 
         // Send ranging response
         let _ = user_led.set_low();
         // rprintln!("send range resp");
-        let mut sending = ranging::Response::new(&mut dw1000, &request)
-            .expect("ranging new")
+        let mut sending = ranging::Response::new(&mut dw1000, &range_req)
+            .expect("resp new")
             .send(dw1000)
-            .expect("ranging send");
-        nb::block!({ sending.wait_transmit() }).expect("ranging xmit");
-        dw1000 = sending.finish_sending().expect("ranging xmit finish");
-        rprintln!("sent range");
-        delay_source.delay_ms(150u32);
+            .expect("resp send");
+        delay_source.delay_ms(5u32);
+        nb::block!({ sending.wait_transmit() }).expect("resp xmit");
+        dw1000 = sending.finish_sending().expect("resp xmit finish");
+        rprintln!("resp sent {}", loop_count);
 
     }
 }
@@ -199,13 +202,16 @@ fn clear_timeout_timer() {
 
 fn wait_for_trigger_or_timeout(rate_hz: u32) -> bool  {
     let triggered: bool;
+
     start_timeout_timer(rate_hz);
+    G_DW_TRIGGER.store(false, Ordering::Relaxed);
 
     loop {
         if G_DW_TRIGGER.load(Ordering::Relaxed) {
             // the exti pin triggered
             G_DW_TRIGGER.store(false, Ordering::Relaxed);
             triggered = true;
+            // rprintln!("triggered");
             break;
         }
         else if G_TIM2_TRIGGER.load(Ordering::Relaxed) {
@@ -218,6 +224,7 @@ fn wait_for_trigger_or_timeout(rate_hz: u32) -> bool  {
         }
         //wait for either an exti pin interrupt or timer interrupt
         cortex_m::asm::wfi();
+
     }
 
     clear_timeout_timer();

@@ -106,7 +106,6 @@ pub fn setup_peripherals() -> (
         pac::NVIC::unmask(irq_pin.interrupt());
     };
 
-
     (user_led1,
      delay_source,
      i2c1_port,
